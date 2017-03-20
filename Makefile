@@ -8,10 +8,10 @@ KMER_PACKED_LENGTH 	= $(shell echo $$((($(KMER_LENGTH)+3)/4)))
 CFLAGS 	= -O3 
 CFLAGSUPC = -O3 -std=gnu99
 DEFINE 	= -DKMER_LENGTH=$(KMER_LENGTH) -DKMER_PACKED_LENGTH=$(KMER_PACKED_LENGTH)
-HEADERS	= contig_generation.h kmer_hash.h packingDNAseq.h
+HEADERS	= commonDefaults.h kmerHash.h packingDNAseq.h
 LIBS	=
 
-TARGETS	= serial pgen
+TARGETS	= serial pgen sort
 
 all: 	$(TARGETS)
 
@@ -20,6 +20,9 @@ serial: serial.c $(HEADERS)
 
 pgen:	pgen.upc $(HEADERS)
 		$(UPCC) $(UPCFLAGS) -Wc,"$(CFLAGSUPC)" -o $@ $< $(DEFINE) $(LIBS)
+
+sort:	sort.cpp
+	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
 
 clean :
 	rm -f *.o

@@ -4,12 +4,12 @@
 #SBATCH -N 1
 #SBATCH -t 00:30:00 
 #SBATCH -J single-HW3
-#SBATCH -o single-HW3.%j.out
-#SBATCH -e single-HW3.%j.err
+#SBATCH -o output/single-HW3.%j.out
+#SBATCH -e output/single-HW3.%j.err
 
 
 # Specify path to your input file here
-INPUT=test
+INPUT=input/test
 
 cd ${PWD}
 for P in `seq 1 6`; do

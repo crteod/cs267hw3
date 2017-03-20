@@ -4,11 +4,11 @@
 #SBATCH -N 8
 #SBATCH -t 00:20:00 
 #SBATCH -J multi-HW3
-#SBATCH -o multi-HW3.%j.out
-#SBATCH -e multi-HW3.%j.err
+#SBATCH -o output/multi-HW3.%j.out
+#SBATCH -e output/multi-HW3.%j.err
 
 # Specify path to your input file here
-INPUT=test
+INPUT=input/test
 
 cd ${PWD}
 for P in 96 120 144 168 192; do

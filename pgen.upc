@@ -7,10 +7,11 @@
 #include <upc.h>
 
 #include "packingDNAseq.h"
-#include "kmer_hash.h"
+#include "kmerHash.h"
+#include "commonDefaults.h"
 
 
-int main(int argc, char *argv[]){
+int main(int argc, char *argv[]) {
 
 	/** Declarations **/
 	double inputTime=0.0, constrTime=0.0, traversalTime=0.0;
@@ -36,7 +37,7 @@ int main(int argc, char *argv[]){
 	traversalTime -= gettime();
 	////////////////////////////////////////////////////////////
 	// Your code for graph traversal and output printing here //
-	// Save your output to "pgen.out"                         //
+	// Save your output to "output/pgen.out"                  //
 	////////////////////////////////////////////////////////////
 	upc_barrier;
 	traversalTime += gettime();
