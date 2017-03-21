@@ -35,3 +35,19 @@ hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memory_heap) {
   
   return result;
 }
+
+/* Auxiliary function for computing hash values */
+int64_t hashSeq(int64_t  hashtable_size, char *seq, int size) {
+  unsigned long hashval;
+  hashval = 5381;
+  for(int i = 0; i < size; i++) {
+    hashval = seq[i] +  (hashval << 5) + hashval;
+  }
+  
+  return (hashval % hashtable_size);
+}
+
+/* Returns the hash value of a kmer */
+int64_t hashKmer(int64_t  hashtable_size, char *seq) {
+  return hashSeq(hashtable_size, seq, KMER_PACKED_LENGTH);
+}
