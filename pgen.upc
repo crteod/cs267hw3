@@ -5,8 +5,8 @@
 #include <math.h>
 #include <time.h>
 #include <upc.h>
-//#include <upc_atomic.h>
-#include <upc_collective.h>
+//#include <upc_collective.h>
+#include <bupc_collectivev.h>
 
 #include "packingDNAseq.h"
 #include "kmerHash_upc.h"
@@ -16,33 +16,122 @@
 int main(int argc, char *argv[]) {
   
   /** Declarations **/
+  
+  // Private variables
   double inputTime=0.0, constrTime=0.0, traversalTime=0.0;
   const int ROOT = 0;
-  shared hash_table_t * hashtable;
+  char leftExt, rightExt;
+  start_kmer_t *startKmersList = NULL, *currStartLink;
+  
+  // Private variables to shared memory
+  shared directory_entry_t *directory;
+  directory = upc_all_alloc(THREADS, sizeof(directory_entry_t));
+  upc_barrier;
+  directory[MYTHREAD].size = 0;
   
   /** Read input **/
   upc_barrier;
   inputTime -= gettime();
-  ///////////////////////////////////////////
-  // Your code for input file reading here //
+  
+  /* Read the input file name */
+  char *inputUFXName = argv[1];
+  
+  /* Initialize lookup table that will be used for the DNA packing routines */
+  initLookupTable();
+  
+  /* Extract the number of k-mers in the input file */
+  int64_t nKmers = getNumKmersInUFX(inputUFXName);
+  
+  /* Read the kmers from the input file and store them in the workBuffer */
+  int64_t totalCharsToRead = nKmers * LINE_SIZE;
+  unsigned char * workBuffer = (unsigned char*) malloc(totalCharsToRead * sizeof(unsigned char));
+  FILE * inputFile = fopen(inputUFXName, "r");
+  int64_t currCharsRead = fread(workBuffer, sizeof(unsigned char),totalCharsToRead , inputFile);
+  fclose(inputFile);
+        
   ///////////////////////////////////////////
   upc_barrier;
   inputTime += gettime();
-  
+
   /** Graph construction **/
   constrTime -= gettime();
-  ///////////////////////////////////////////
-  // Your code for graph construction here //
-  ///////////////////////////////////////////
+  
+  int64_t heapBlockSize = nKmers / THREADS;
+  if ((nKmers % THREADS) != 0)
+    heapBlockSize++;
+  
+  /* Create a hash table */
+  memory_heap_t memory_heap;
+  // TODO: shared or no?
+  shared hash_table_t *hashtable = createHashTable(nKmers, &memory_heap, heapBlockSize);
+  
+  /* Process the workBuffer and store the k-mers in the hash table */
+  /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, then a tab and then two chatacers, one for the left (backward) extension and one for the right (forward) extension */
+  int64_t ptr = 0;
+  while (ptr < currCharsRead) {
+    /* workBuffer[ptr] is the start of the current k-mer                */
+    /* so current left extension is at workBuffer[ptr+KMER_LENGTH+1]    */
+    /* and current right extension is at workBuffer[ptr+KMER_LENGTH+2]  */
+    
+    leftExt = (char) workBuffer[ptr+KMER_LENGTH+1];
+    rightExt = (char) workBuffer[ptr+KMER_LENGTH+2];
+    
+    /* Add k-mer to hash table */
+    int64_t kmerIndex = addKmer(hashtable, &memory_heap, &workBuffer[ptr], leftExt, rightExt);
+    
+    /* Create also a list with the "start" kmers: nodes with F as left (backward) extension */
+    if (leftExt == 'F') {
+      addKmerToStartList(&memory_heap, &startKmersList, kmerIndex);
+      directory[MYTHREAD].size++;
+    }
+    
+    /* Move to the next k-mer in the input workBuffer */
+    ptr += LINE_SIZE;
+  }
+  
+  int my_array_size = directory[MYTHREAD].size;
+  
+  // TODO: check if pointer has to be shared
+  directory[MYTHREAD].localStartArray = upc_alloc(my_array_size * sizeof(shared kmer_t *shared));
+  
+  if (directory[MYTHREAD].localStartArray == NULL) {
+    fprintf(stderr, "ERROR: Could not allocate memory for the local start array: %lu bytes for thread %d\n", my_array_size * sizeof(shared kmer_t *shared), MYTHREAD);
+    exit(1);
+  }
+  
+  int currIndex = 0;
+  currStartLink = startKmersList;
+  while (currStartLink != NULL) {
+    directory[MYTHREAD].localStartArray[currIndex] = currStartLink->kmerPtr;
+    
+    currStartLink = currStartLink->next;
+    currIndex++;
+  }
+  
+  
+  // Shared pointer to global list of all thread's master start-node lists
+  shared kmer_t * shared * globalStartNodeArray;
+  
+  // Local pointer to first location (with thread affinity) of each thread's master list
+  //shared [1] kmer_t * startNodesGlobal;
+  shared kmer_t * shared * startNodesGlobal; // TODO: was this previously
+  int64_t totalStartNodes = bupc_allv_reduce(int64_t, my_array_size, 0, UPC_ADD);
+  globalStartNodeArray = upc_all_alloc(THREADS, totalStartNodes * sizeof(shared kmer_t *shared));
+  
+  if (globalStartNodeArray == NULL) {
+    fprintf(stderr, "ERROR: Could not allocate memory for the global start array: %lu bytes\n", totalStartNodes * sizeof(shared start_kmer_t *shared));
+    exit(1);
+  }
+  
+  startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
+  
+  //
+  // MEGA TODO: GATHER FULL START NODE LIST AND BROADCAST!!!
+  // ALL2ALL COMMUNICATION GOES HERE
+  //
+  
   upc_barrier;
   constrTime += gettime();
-  
-  ////////////////////////////////////////////////////////////
-  // TODO: after a2a, I need startNodesGlobal to be the globally defined array
-  shared start_kmer_t *startNodesGlobal;
-  // TODO: after a2a, I need totalStartNodes to be the size of startNodes
-  int64_t totalStartNodes;
-  ////////////////////////////////////////////////////////////
   
   /** Graph traversal **/
   traversalTime -= gettime();
@@ -70,6 +159,7 @@ int main(int argc, char *argv[]) {
     *currSNIndex = 0;
   localContigs[MYTHREAD] = 0;
   localBases[MYTHREAD] = 0;
+  unpackedKmer[KMER_LENGTH] = '\0';
   upc_barrier;
   
   // Synchronization
@@ -83,14 +173,14 @@ int main(int argc, char *argv[]) {
       break;
     }
     
-    // TODO: confirm on Piazza @203 that this does in fact work
-    shared [1] start_kmer_t *currStartNode = &startNodesGlobal[localSNIndex];
     /* Unpack first seed and initialize contig */
-    currKmerPtr = currStartNode->kmerPtr; // communication
+    
+    // TODO: confirm on Piazza @203 that shared [1] kmer_t * does in fact work
+    shared kmer_t *currKmerPtr = startNodesGlobal[localSNIndex];
     unpackSequence((unsigned char*) currKmerPtr->kmer,  (unsigned char*) unpackedKmer, KMER_LENGTH);
     memcpy(currContig, unpackedKmer, KMER_LENGTH * sizeof(char));
     int64_t posInContig = KMER_LENGTH;
-    char rightExt = currKmerPtr->r_ext; // communication
+    rightExt = currKmerPtr->r_ext; // communication
     
     /* Keep adding bases until we find a terminal node */
     while (rightExt != 'F') {
@@ -137,4 +227,5 @@ int main(int argc, char *argv[]) {
   }
   
   return 0;
+  
 }
