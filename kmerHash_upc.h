@@ -11,11 +11,14 @@
 #include "commonDefaults_upc.h"
 
 /* Creates a hash table and (pre)allocates memory for the memory heap */
-shared hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memory_heap) {
+hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memory_heap) {
   hash_table_t *result;
   int64_t n_buckets = nEntries * LOAD_FACTOR;
+  int64_t heap_block_size = nEntries / THREADS;
+  if ((nEntries % THREADS) != 0)
+    heap_block_size++;
   
-  result = (hash_table_t*) upc_all_alloc(1, sizeof(hash_table_t));
+  result = malloc(sizeof(hash_table_t));
   result->size = n_buckets;
   result->table = upc_all_alloc(n_buckets, sizeof(bucket_t)); //need to initialize to 0
   upc_memset(result->table, 0, n_buckets * sizeof(bucket_t));
@@ -26,12 +29,12 @@ shared hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memory_hea
     exit(1);
   }
   
-  memory_heap->heap = upc_all_alloc(THREADS, nEntries / THREADS * sizeof(kmer_t));
+  memory_heap->heap = upc_all_alloc(THREADS, heap_block_size * sizeof(kmer_t));
   if (memory_heap->heap == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the heap!\n");
     exit(1);
   }
-  memory_heap->posInHeap = 0;
+  memory_heap->posInHeap = MYTHREAD * heap_block_size;
   
   return result;
 }
@@ -59,9 +62,10 @@ kmer_t* lookupKmer(hash_table_t *hashtable, const unsigned char *kmer) {
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
   bucket_t cur_bucket;
-  kmer_t *result;
+  shared kmer_t *result;
   
-  cur_bucket = hashtable->table[hashval];
+  // might not need cast but going from bucket_t in shared space to a local copy
+  cur_bucket = (bucket_t) hashtable->table[hashval];
   result = cur_bucket.head;
   
   for (; result!=NULL; ) {

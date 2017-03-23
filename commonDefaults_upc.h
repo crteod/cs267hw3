@@ -32,33 +32,34 @@ struct kmer_t{
   char kmer[KMER_PACKED_LENGTH];
   char l_ext;
   char r_ext;
-  kmer_t *next;
+  shared kmer_t *next;
 };
 
 /* Start k-mer data structure */
 typedef struct start_kmer_t start_kmer_t;
 struct start_kmer_t{
-  kmer_t *kmerPtr;
+  shared kmer_t *kmerPtr;
   start_kmer_t *next;
 };
 
 /* Bucket data structure */
 typedef struct bucket_t bucket_t;
 struct bucket_t{
-  kmer_t *head;          // Pointer to the first entry of that bucket
+  shared kmer_t *head;          // Pointer to the first entry of that bucket
+  upc_lock_t *bucketLock;
 };
 
 /* Hash table data structure */
-typedef shared struct hash_table_t hash_table_t;
+typedef struct hash_table_t hash_table_t;
 struct hash_table_t {
   int64_t size;          // Size of the hash table
-  bucket_t *table;	 // Entries of the hash table are pointers to buckets
+  shared bucket_t *table;	 // Entries of the hash table buckets
 };
 
 /* Memory heap data structure */
 typedef struct memory_heap_t memory_heap_t;
 struct memory_heap_t {
-  kmer_t *heap;
+  shared kmer_t *heap;
   int64_t posInHeap;
 };
 
