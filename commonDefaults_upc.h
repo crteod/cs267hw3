@@ -30,8 +30,8 @@
 typedef struct kmer_t kmer_t;
 struct kmer_t{
   char kmer[KMER_PACKED_LENGTH];
-  char l_ext;
-  char r_ext;
+  char lExt;
+  char rExt;
   shared kmer_t *next;
 };
 
@@ -115,7 +115,7 @@ int64_t getNumKmersInUFX(const char *filename) {
   }
   fclose(f);
   int64_t numKmers = totalSize / LINE_SIZE;
-  printf("Detected %lld kmers in text UFX file: %s\n", numKmers, filename);
+  printf("Detected %ld kmers in text UFX file: %s\n", numKmers, filename);
   return numKmers;
 }
 

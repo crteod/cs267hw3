@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
   ///////////////////////////////////////////
   upc_barrier;
   inputTime += gettime();
-
+  
   /** Graph construction **/
   constrTime -= gettime();
   
@@ -61,12 +61,13 @@ int main(int argc, char *argv[]) {
     heapBlockSize++;
   
   /* Create a hash table */
-  memory_heap_t memory_heap;
+  memory_heap_t memoryHeap;
   // TODO: shared or no?
-  shared hash_table_t *hashtable = createHashTable(nKmers, &memory_heap, heapBlockSize);
+  shared hash_table_t *hashtable = createHashTable(nKmers, &memoryHeap, heapBlockSize);
   
   /* Process the workBuffer and store the k-mers in the hash table */
-  /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, then a tab and then two chatacers, one for the left (backward) extension and one for the right (forward) extension */
+  /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, 
+     then a tab and then two characters (one for the left (backward) extension and one for the right (forward) extension) */
   int64_t ptr = 0;
   while (ptr < currCharsRead) {
     /* workBuffer[ptr] is the start of the current k-mer                */
@@ -77,11 +78,11 @@ int main(int argc, char *argv[]) {
     rightExt = (char) workBuffer[ptr+KMER_LENGTH+2];
     
     /* Add k-mer to hash table */
-    int64_t kmerIndex = addKmer(hashtable, &memory_heap, &workBuffer[ptr], leftExt, rightExt);
+    int64_t kmerIndex = addKmer(hashtable, &memoryHeap, &workBuffer[ptr], leftExt, rightExt);
     
     /* Create also a list with the "start" kmers: nodes with F as left (backward) extension */
     if (leftExt == 'F') {
-      addKmerToStartList(&memory_heap, &startKmersList, kmerIndex);
+      addKmerToStartList(&memoryHeap, &startKmersList, kmerIndex);
       directory[MYTHREAD].size++;
     }
     
@@ -89,13 +90,13 @@ int main(int argc, char *argv[]) {
     ptr += LINE_SIZE;
   }
   
-  int my_array_size = directory[MYTHREAD].size;
+  int64_t localArraySize = directory[MYTHREAD].size;
   
   // TODO: check if pointer has to be shared
-  directory[MYTHREAD].localStartArray = upc_alloc(my_array_size * sizeof(shared kmer_t *shared));
+  directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(shared kmer_t *shared));
   
   if (directory[MYTHREAD].localStartArray == NULL) {
-    fprintf(stderr, "ERROR: Could not allocate memory for the local start array: %lu bytes for thread %d\n", my_array_size * sizeof(shared kmer_t *shared), MYTHREAD);
+    fprintf(stderr, "ERROR: Could not allocate memory for the local start array: %lu bytes for thread %d\n", localArraySize * sizeof(shared kmer_t *shared), MYTHREAD);
     exit(1);
   }
   
@@ -114,8 +115,8 @@ int main(int argc, char *argv[]) {
   
   // Local pointer to first location (with thread affinity) of each thread's master list
   //shared [1] kmer_t * startNodesGlobal;
-  shared kmer_t * shared * startNodesGlobal; // TODO: was this previously
-  int64_t totalStartNodes = bupc_allv_reduce(int64_t, my_array_size, 0, UPC_ADD);
+  shared kmer_t * shared * startNodesGlobal; // TODO: why don't we need shared [1] kmer_t * startNodesGlobal; here?
+  int64_t totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
   globalStartNodeArray = upc_all_alloc(THREADS, totalStartNodes * sizeof(shared kmer_t *shared));
   
   if (globalStartNodeArray == NULL) {
@@ -136,7 +137,7 @@ int main(int argc, char *argv[]) {
   /** Graph traversal **/
   traversalTime -= gettime();
   
-  // TODO: Save your output to "output/pgen.out"
+  // TODO: Save output to "output/pgen.out"
   char localOutFilename[20];
   sprintf(localOutFilename, "output/pgen%d.out", MYTHREAD);
   FILE * myOutputFile = fopen(localOutFilename, "w");
@@ -180,7 +181,7 @@ int main(int argc, char *argv[]) {
     unpackSequence((unsigned char*) currKmerPtr->kmer,  (unsigned char*) unpackedKmer, KMER_LENGTH);
     memcpy(currContig, unpackedKmer, KMER_LENGTH * sizeof(char));
     int64_t posInContig = KMER_LENGTH;
-    rightExt = currKmerPtr->r_ext; // communication
+    rightExt = currKmerPtr->rExt; // communication
     
     /* Keep adding bases until we find a terminal node */
     while (rightExt != 'F') {
@@ -188,7 +189,7 @@ int main(int argc, char *argv[]) {
       posInContig++;
       /* The last kmer in the current contig is at position currContig[posInContig-KMER_LENGTH] */
       currKmerPtr = lookupKmer(hashtable, (const unsigned char *) &currContig[posInContig-KMER_LENGTH]);
-      rightExt = currKmerPtr->r_ext; // communication
+      rightExt = currKmerPtr->rExt; // communication
     }
     
     /* Print the contig to our local file */
@@ -213,9 +214,19 @@ int main(int argc, char *argv[]) {
   upc_all_reduceL(totalBases, localBases, UPC_ADD, THREADS, 1, 
 		  NULL, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
   upc_barrier;
+  
+  /** CLEAN UP */
+  upc_free(directory[MYTHREAD].localStartArray);
+  upc_all_free(directory);
+  free(workBuffer);
+    
   upc_all_free(localContigs);
   upc_all_free(localBases);
   upc_lock_free(indexLock);
+  
+  deallocHeap(&memoryHeap);
+  deallocHashtable(hashtable);
+  
   /***** DO NOT CHANGE THIS PART ****/
   if(MYTHREAD==ROOT){
     printf("%s: Input set: %s\n", argv[0], argv[1]);
@@ -223,7 +234,7 @@ int main(int argc, char *argv[]) {
     printf("Input reading time: %f seconds\n", inputTime);
     printf("Graph construction time: %f seconds\n", constrTime);
     printf("Graph traversal time: %f seconds\n", traversalTime);
-    printf("Generated %lld contigs with %lld total bases\n", *totalContigs, *totalBases);
+    printf("Generated %ld contigs with %ld total bases\n", *totalContigs, *totalBases);
   }
   
   return 0;
