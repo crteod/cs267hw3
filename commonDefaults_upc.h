@@ -63,6 +63,13 @@ struct memory_heap_t {
   int64_t posInHeap;
 };
 
+/* Directory entries data structure */
+typedef struct directory_entry_t directory_entry_t;
+struct directory_entry_t {
+  shared kmer_t *shared * localStartArray;
+  int64_t size;
+};
+
 
 
 
