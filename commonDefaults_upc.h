@@ -1,5 +1,5 @@
-#ifndef COMMON_DEFAULTS_H
-#define COMMON_DEFAULTS_H
+#ifndef COMMON_DEFAULTS_UPC_H
+#define COMMON_DEFAULTS_UPC_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,33 +32,33 @@ struct kmer_t{
   char kmer[KMER_PACKED_LENGTH];
   char l_ext;
   char r_ext;
-  kmer_t *next;
+  shared kmer_t *next;
 };
 
 /* Start k-mer data structure */
 typedef struct start_kmer_t start_kmer_t;
 struct start_kmer_t{
-  kmer_t *kmerPtr;
-  start_kmer_t *next;
+  shared kmer_t *kmerPtr;
+  shared start_kmer_t *next;
 };
 
 /* Bucket data structure */
 typedef struct bucket_t bucket_t;
 struct bucket_t{
-  kmer_t *head;          // Pointer to the first entry of that bucket
+  shared kmer_t *head;   // Pointer to the first entry of that bucket
 };
 
 /* Hash table data structure */
-typedef shared struct hash_table_t hash_table_t;
+typedef struct hash_table_t hash_table_t;
 struct hash_table_t {
-  int64_t size;          // Size of the hash table
-  bucket_t *table;	 // Entries of the hash table are pointers to buckets
+  int64_t size;            // Size of the hash table
+  shared bucket_t *table;  // Entries of the hash table are pointers to buckets
 };
 
 /* Memory heap data structure */
 typedef struct memory_heap_t memory_heap_t;
 struct memory_heap_t {
-  kmer_t *heap;
+  shared kmer_t *heap;
   int64_t posInHeap;
 };
 
@@ -121,4 +121,4 @@ static double gettime(void) {
   return ((double)tv.tv_sec) + tv.tv_usec/1000000.0;
 }
 
-#endif // COMMON_DEFAULTS_H
+#endif // COMMON_DEFAULTS_UPC_H
