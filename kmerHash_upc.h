@@ -11,14 +11,13 @@
 #include "commonDefaults_upc.h"
 
 /* Creates a hash table and (pre)allocates memory for the memory heap */
-shared hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64_t heapBlockSize) {
-  shared hash_table_t *result;
+hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64_t heapBlockSize) {
+  hash_table_t *result;
   int64_t nBuckets = nEntries * LOAD_FACTOR;
   
-  result = upc_all_alloc(1, sizeof(hash_table_t));
-  if (MYTHREAD == ROOT)
-    result->size = nBuckets;
-  
+  result = malloc(sizeof(hash_table_t));
+  result->size = nBuckets;
+  // TODO: check that sizeof shared bucket_t doesn't change things
   result->table = upc_all_alloc(nBuckets, sizeof(bucket_t));
   
   if (result->table == NULL) {
@@ -65,7 +64,7 @@ int64_t hashKmer(int64_t  hashtable_size, char *seq) {
 }
 
 /* Looks up a kmer in the hash table and returns a pointer to that entry */
-shared kmer_t* lookupKmer(shared hash_table_t *hashtable, const unsigned char *kmer) {
+shared kmer_t* lookupKmer(hash_table_t *hashtable, const unsigned char *kmer) {
   
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
@@ -73,7 +72,7 @@ shared kmer_t* lookupKmer(shared hash_table_t *hashtable, const unsigned char *k
   bucket_t currBucket;
   shared kmer_t *result;
   
-  // TODO: does this have to be done with pointers because bucket_t is in shared space?
+  // TODO: check don't need cast to local (bucket_t)
   currBucket = hashtable->table[hashval];
   result = currBucket.head;
   
@@ -88,7 +87,7 @@ shared kmer_t* lookupKmer(shared hash_table_t *hashtable, const unsigned char *k
 }
 
 /* Adds a kmer and its extensions in the hash table (note that memory heap must be preallocated!) */
-int64_t addKmer(shared hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsigned char *kmer, char leftExt, char rightExt) {
+int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsigned char *kmer, char leftExt, char rightExt) {
   
   // Pack a k-mer sequence appropriately
   char packedKmer[KMER_PACKED_LENGTH];
@@ -102,13 +101,13 @@ int64_t addKmer(shared hash_table_t *hashtable, memory_heap_t *memoryHeap, const
   (memoryHeap->heap[pos]).lExt = leftExt;
   (memoryHeap->heap[pos]).rExt = rightExt;
   
-  // Enter critical zone serializing updates to bucket list
+  // Enter critical section serializing updates to bucket list
   upc_lock((hashtable->table[hashval]).bucketLock);
   // Fix the next pointer to point to the appropriate kmer struct
   (memoryHeap->heap[pos]).next = hashtable->table[hashval].head;
   // Fix the head pointer of the appropriate bucket to point to the current kmer
   hashtable->table[hashval].head = &(memoryHeap->heap[pos]);
-  // Exit critical zone
+  // Exit critical section
   upc_unlock((hashtable->table[hashval]).bucketLock);
   
   // Increase the heap pointer
@@ -131,17 +130,17 @@ void addKmerToStartList(memory_heap_t *memoryHeap, start_kmer_t **startKmersList
 /* Deallocate heap. Call before calling deallocHashtable */
 int deallocHeap(memory_heap_t *memoryHeap) {
   upc_all_free(memoryHeap->heap);
+  free(memoryHeap);
   return 0;
 }
 
 /** Deallocate hashtable */
-int deallocHashtable(shared hash_table_t *hashtable) {
+int deallocHashtable(hash_table_t *hashtable) {
   upc_forall(int i = 0; i < hashtable->size; ++i; i) {
     upc_lock_free(hashtable->table[i].bucketLock);
   }
   upc_all_free(hashtable->table);
-  upc_all_free(hashtable);
-  
+  free(hashtable);
   return 0;
 }
 
