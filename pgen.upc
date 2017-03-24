@@ -46,7 +46,7 @@ int main(int argc, char *argv[]) {
   int64_t kmersPerThread = nKmers / THREADS;
   int64_t kmersLeftOver = nKmers - (kmersPerThread*(THREADS-1));
   int64_t charsToRead;
-  if (MYTHREAD == THREADS-1) {
+  if (MYTHREAD < THREADS-1) {
     charsToRead = kmersPerThread * LINE_SIZE;
   }
   else {
@@ -56,7 +56,8 @@ int main(int argc, char *argv[]) {
   unsigned char * workBuffer = (unsigned char*) malloc(charsToRead * sizeof(unsigned char));
   
   FILE * inputFile = fopen(inputUFXName, "r");
-  fseek(inputFile, MYTHREAD*kmersPerThread*LINE_SIZE, SEEK_SET);
+  int64_t offset = MYTHREAD*kmersPerThread*LINE_SIZE;
+  fseek(inputFile, offset, SEEK_SET);
   int64_t charsRead = fread(workBuffer, sizeof(unsigned char), charsToRead, inputFile);
   fclose(inputFile);
   if (charsRead != charsToRead) {
