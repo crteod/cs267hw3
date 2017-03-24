@@ -141,8 +141,7 @@ int main(int argc, char *argv[]) {
     upc_global_exit(1);
   }
   
-  // Gather all local arrays into a global array of start kmers on the root thread
-  
+  /* Gather all local arrays into a global array of start kmers on the root thread */
   // TODO: Make sure the [] allocates to root thread, or if works without
   shared kmer_t * shared [] * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);;
   
@@ -153,26 +152,21 @@ int main(int argc, char *argv[]) {
   
   int64_t rootStartNodeArrayOffset = 0;
   
-  for (int i = 0; i < MYTHREAD; ++i)
-  {
+  for (int i = 0; i < MYTHREAD; ++i) {
     // TODO: consider also gathering/broadcasting an array of sizes to minimize remote accesses for sizes
     rootStartNodeArrayOffset += directory[i].size;
   }
   
   upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(shared kmer_t *shared));
-  
+  upc_barrier;
   // Broadcast global array of start kmers to all threads
-  
-  upc_all_broadcast(globalStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes, UPC_IN_ALLSYNC | UPC_OUT_ALLSYNC);
-  
+  upc_all_broadcast(globalStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
   
   // Local pointer to first location (with thread affinity) of each thread's master list
   //shared [1] kmer_t * startNodesGlobal;
   shared kmer_t * shared * startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
   
-  
-  
-  //upc_global_exit(0);
+  printf("%d finishing a2a\n", MYTHREAD);
   
   //
   // MEGA TODO: GATHER FULL START NODE LIST AND BROADCAST!!!
@@ -208,6 +202,8 @@ int main(int argc, char *argv[]) {
   localContigs[MYTHREAD] = 0;
   localBases[MYTHREAD] = 0;
   unpackedKmer[KMER_LENGTH] = '\0';
+  
+  printf("%d finished initialization\n", MYTHREAD);
   
   // Synchronization
   //while((localSNIndex = bupc_atomicI64_fetchadd_S(currSNIndex, (int64_t) 1LL)) != totalStartNodes-1) {
@@ -250,6 +246,8 @@ int main(int argc, char *argv[]) {
   upc_barrier;
   traversalTime += gettime();
   
+  printf("%d finished traversal\n", MYTHREAD);
+  
   /** Print timing and output info **/
   // TODO: reduce localContigs and localBases for debugging
   shared int64_t *totalBases;
@@ -260,6 +258,8 @@ int main(int argc, char *argv[]) {
   upc_all_reduceL(totalBases, localBases, UPC_ADD, THREADS, 1, 
 		  NULL, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
   upc_barrier;
+  
+  printf("%d finished reductions\n", MYTHREAD);
   
   /** CLEAN UP */
   upc_free(directory[MYTHREAD].localStartArray);
