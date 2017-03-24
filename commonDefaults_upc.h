@@ -26,6 +26,10 @@
 #define LINE_SIZE (KMER_LENGTH+4)
 #endif
 
+#ifndef ROOT
+#define ROOT 0
+#endif
+
 /* K-mer data structure */
 typedef struct kmer_t kmer_t;
 struct kmer_t{
@@ -42,6 +46,21 @@ struct start_kmer_t{
   start_kmer_t *next;
 };
 
+/* Directory entries data structure */
+typedef struct directory_entry_t directory_entry_t;
+struct directory_entry_t {
+  shared kmer_t *shared * localStartArray;
+  int64_t size;
+};
+
+
+/* Memory heap data structure */
+typedef struct memory_heap_t memory_heap_t;
+struct memory_heap_t {
+  shared kmer_t *heap;
+  int64_t posInHeap;
+};
+
 /* Bucket data structure */
 typedef struct bucket_t bucket_t;
 struct bucket_t{
@@ -56,19 +75,8 @@ struct hash_table_t {
   shared bucket_t *table;	// Entries of the hash table buckets
 };
 
-/* Memory heap data structure */
-typedef struct memory_heap_t memory_heap_t;
-struct memory_heap_t {
-  shared kmer_t *heap;
-  int64_t posInHeap;
-};
 
-/* Directory entries data structure */
-typedef struct directory_entry_t directory_entry_t;
-struct directory_entry_t {
-  shared kmer_t *shared * localStartArray;
-  int64_t size;
-};
+
 
 
 

@@ -16,33 +16,32 @@ shared hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap
   int64_t nBuckets = nEntries * LOAD_FACTOR;
   
   result = upc_all_alloc(1, sizeof(hash_table_t));
-  result->size = nBuckets;
-  // TODO: should this be sizeof(shared bucket_t)? I don't think it matters unless it's a pointer
-  result->table = upc_all_alloc(nBuckets, sizeof(bucket_t)); //need to initialize to 0
+  if (MYTHREAD == ROOT)
+    result->size = nBuckets;
+  
+  result->table = upc_all_alloc(nBuckets, sizeof(bucket_t));
   
   if (result->table == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the hash table: %ld buckets of %lu bytes\n", nBuckets, sizeof(bucket_t));
     fprintf(stderr, "ERROR: Are you sure that your input is of the correct KMER_LENGTH in Makefile?\n");
-    exit(1);
+    upc_global_exit(1);
   }
   
-  //upc_memset(result->table, 0, nBuckets * sizeof(bucket_t));
-  
   upc_lock_t *lock;
-  upc_forall(int i = 0; i < nBuckets; i++; i) {
+  upc_forall(int i = 0; i < nBuckets; ++i; i) {
     if ((lock = upc_global_lock_alloc()) == NULL) {
-      printf("Failed to alloc lock\n");
+      fprintf(stderr, "ERROR: Failed to alloc lock\n");
       upc_global_exit(1);
     }
     result->table[i].bucketLock = lock;
-    result->table[i].head = 0;
+    result->table[i].head = 0; // Must be set to 0 before addKmer() called
   }
   
   memoryHeap->heap = upc_all_alloc(THREADS, heapBlockSize * sizeof(kmer_t));
   
   if (memoryHeap->heap == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the heap!\n");
-    exit(1);
+    upc_global_exit(1);
   }
   memoryHeap->posInHeap = MYTHREAD * heapBlockSize;
   
@@ -110,7 +109,7 @@ int64_t addKmer(shared hash_table_t *hashtable, memory_heap_t *memoryHeap, const
   // Fix the head pointer of the appropriate bucket to point to the current kmer
   hashtable->table[hashval].head = &(memoryHeap->heap[pos]);
   // Exit critical zone
-  upc_lock((hashtable->table[hashval]).bucketLock);
+  upc_unlock((hashtable->table[hashval]).bucketLock);
   
   // Increase the heap pointer
   memoryHeap->posInHeap++;

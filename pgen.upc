@@ -19,7 +19,6 @@ int main(int argc, char *argv[]) {
   
   // Private variables
   double inputTime=0.0, constrTime=0.0, traversalTime=0.0;
-  const int ROOT = 0;
   char leftExt, rightExt;
   start_kmer_t *startKmersList = NULL, *currStartLink;
   
@@ -61,8 +60,8 @@ int main(int argc, char *argv[]) {
   int64_t charsRead = fread(workBuffer, sizeof(unsigned char), charsToRead, inputFile);
   fclose(inputFile);
   if (charsRead != charsToRead) {
-    printf("ERROR: thread %d only read %ld/%ld bytes!\n", MYTHREAD, charsRead, charsToRead);
-    return 0;
+    fprintf(stderr, "ERROR: thread %d only read %ld/%ld bytes!\n", MYTHREAD, charsRead, charsToRead);
+    upc_global_exit(1);
   }
   
   ///////////////////////////////////////////
@@ -71,15 +70,15 @@ int main(int argc, char *argv[]) {
   
   /** Graph construction **/
   constrTime -= gettime();
+  printf("%d finished reading input file!\n", MYTHREAD);
   
-  int64_t heapBlockSize = nKmers / THREADS;
-  if ((nKmers % THREADS) != 0)
-    heapBlockSize++;
+  int64_t heapBlockSize = (kmersPerThread > kmersLeftOver ? kmersPerThread : kmersLeftOver);
   
   /* Create a hash table */
   memory_heap_t memoryHeap;
-  // TODO: shared or no?
   shared hash_table_t *hashtable = createHashTable(nKmers, &memoryHeap, heapBlockSize);
+  
+  printf("%d created hash table!\n", MYTHREAD);
   
   /* Process the workBuffer and store the k-mers in the hash table */
   /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, 
@@ -106,14 +105,15 @@ int main(int argc, char *argv[]) {
     ptr += LINE_SIZE;
   }
   
+  printf("%d added kmers to hash table!\n", MYTHREAD);
+  
   int64_t localArraySize = directory[MYTHREAD].size;
   
-  // TODO: check if pointer has to be shared
   directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(shared kmer_t *shared));
   
   if (directory[MYTHREAD].localStartArray == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the local start array: %lu bytes for thread %d\n", localArraySize * sizeof(shared kmer_t *shared), MYTHREAD);
-    exit(1);
+    upc_global_exit(1);
   }
   
   int currIndex = 0;
@@ -124,6 +124,8 @@ int main(int argc, char *argv[]) {
     currStartLink = currStartLink->next;
     currIndex++;
   }
+  
+  printf("%d populated directory of start nodes of size %ld!\n", MYTHREAD, directory[MYTHREAD].size);
   
   
   // Shared pointer to global list of all thread's master start-node lists
@@ -136,11 +138,15 @@ int main(int argc, char *argv[]) {
   globalStartNodeArray = upc_all_alloc(THREADS, totalStartNodes * sizeof(shared kmer_t *shared));
   
   if (globalStartNodeArray == NULL) {
-    fprintf(stderr, "ERROR: Could not allocate memory for the global start array: %lu bytes\n", totalStartNodes * sizeof(shared start_kmer_t *shared));
-    exit(1);
+    fprintf(stderr, "ERROR: Could not allocate memory for the global start array: %lu bytes\n", totalStartNodes * sizeof(shared kmer_t *shared));
+    upc_global_exit(1);
   }
   
   startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
+  
+  printf("%d knows total start nodes = %ld!\n", MYTHREAD, totalStartNodes);
+  // TODO: quitting because a2a not done yet
+  upc_global_exit(0);
   
   //
   // MEGA TODO: GATHER FULL START NODE LIST AND BROADCAST!!!
@@ -192,9 +198,8 @@ int main(int argc, char *argv[]) {
     
     /* Unpack first seed and initialize contig */
     
-    // TODO: confirm on Piazza @203 that shared [1] kmer_t * does in fact work
     shared kmer_t *currKmerPtr = startNodesGlobal[localSNIndex];
-    unpackSequence((unsigned char*) currKmerPtr->kmer,  (unsigned char*) unpackedKmer, KMER_LENGTH);
+    unpackSequence((unsigned char*) currKmerPtr->kmer, (unsigned char*) unpackedKmer, KMER_LENGTH);
     memcpy(currContig, unpackedKmer, KMER_LENGTH * sizeof(char));
     int64_t posInContig = KMER_LENGTH;
     rightExt = currKmerPtr->rExt; // communication

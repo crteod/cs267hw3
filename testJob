@@ -1,0 +1,16 @@
+#!/bin/bash -l
+#SBATCH -A mp309
+#SBATCH -p debug
+#SBATCH -N 1
+#SBATCH -t 00:02:00
+#SBATCH -J pgenTest
+#SBATCH -o output/pgenTest.%j.out
+#SBATCH -e output/pgenTest.%j.err
+
+INPUT=input/test
+EXE=./pgen
+export GASNET_BACKTRACE=1
+
+cd ${PWD}
+
+upcrun -n 4 -N 1 ${EXE} ${INPUT}
