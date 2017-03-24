@@ -25,9 +25,9 @@ int main(int argc, char *argv[]) {
   // Private variables to shared memory
   shared directory_entry_t *directory;
   directory = upc_all_alloc(THREADS, sizeof(directory_entry_t));
-  upc_barrier;
   directory[MYTHREAD].size = 0;
   
+  ///////////////////////////////////////////
   /** Read input **/
   upc_barrier;
   inputTime -= gettime();
@@ -76,7 +76,7 @@ int main(int argc, char *argv[]) {
   
   /* Create a hash table */
   memory_heap_t memoryHeap;
-  shared hash_table_t *hashtable = createHashTable(nKmers, &memoryHeap, heapBlockSize);
+  hash_table_t *hashtable = createHashTable(nKmers, &memoryHeap, heapBlockSize);
   
   printf("%d created hash table!\n", MYTHREAD);
   
@@ -133,7 +133,8 @@ int main(int argc, char *argv[]) {
   
   // Local pointer to first location (with thread affinity) of each thread's master list
   //shared [1] kmer_t * startNodesGlobal;
-  shared kmer_t * shared * startNodesGlobal; // TODO: why don't we need shared [1] kmer_t * startNodesGlobal; here?
+  shared kmer_t * shared * startNodesGlobal;
+  
   int64_t totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
   globalStartNodeArray = upc_all_alloc(THREADS, totalStartNodes * sizeof(shared kmer_t *shared));
   
@@ -153,6 +154,7 @@ int main(int argc, char *argv[]) {
   // ALL2ALL COMMUNICATION GOES HERE
   //
   
+  ///////////////////////////////////////////
   upc_barrier;
   constrTime += gettime();
   
@@ -173,28 +175,25 @@ int main(int argc, char *argv[]) {
   shared int64_t *localContigs;
   char unpackedKmer[KMER_LENGTH+1];
   char currContig[MAXIMUM_CONTIG_SIZE];
-  upc_barrier;
+  if (MYTHREAD == ROOT)
+    *currSNIndex = 0;
   indexLock = upc_all_lock_alloc();
   localBases = upc_all_alloc(THREADS, sizeof(int64_t));
   localContigs = upc_all_alloc(THREADS, sizeof(int64_t));
-  upc_barrier;
-  if (MYTHREAD == ROOT)
-    *currSNIndex = 0;
   localContigs[MYTHREAD] = 0;
   localBases[MYTHREAD] = 0;
   unpackedKmer[KMER_LENGTH] = '\0';
-  upc_barrier;
   
   // Synchronization
   //while((localSNIndex = bupc_atomicI64_fetchadd_S(currSNIndex, (int64_t) 1LL)) != totalStartNodes-1) {
-  while(1) {
+  while(1)
+  {
     upc_lock(indexLock);
-    (*currSNIndex)++;
     localSNIndex = *currSNIndex;
+    (*currSNIndex)++;
     upc_unlock(indexLock);
-    if (localSNIndex >= totalStartNodes) {
+    if (localSNIndex >= totalStartNodes)
       break;
-    }
     
     /* Unpack first seed and initialize contig */
     
@@ -222,6 +221,7 @@ int main(int argc, char *argv[]) {
     
   }
   
+  ///////////////////////////////////////////
   upc_barrier;
   traversalTime += gettime();
   
