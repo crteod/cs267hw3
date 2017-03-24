@@ -42,13 +42,28 @@ int main(int argc, char *argv[]) {
   /* Extract the number of k-mers in the input file */
   int64_t nKmers = getNumKmersInUFX(inputUFXName);
   
-  /* Read the kmers from the input file and store them in the workBuffer */
-  int64_t totalCharsToRead = nKmers * LINE_SIZE;
-  unsigned char * workBuffer = (unsigned char*) malloc(totalCharsToRead * sizeof(unsigned char));
+  /* Read the kmers from the input file and store them in workBuffer */
+  int64_t kmersPerThread = nKmers / THREADS;
+  int64_t kmersLeftOver = nKmers - (kmersPerThread*(THREADS-1));
+  int64_t charsToRead;
+  if (MYTHREAD == THREADS-1) {
+    charsToRead = kmersPerThread * LINE_SIZE;
+  }
+  else {
+    charsToRead = kmersLeftOver * LINE_SIZE;
+  }
+  
+  unsigned char * workBuffer = (unsigned char*) malloc(charsToRead * sizeof(unsigned char));
+  
   FILE * inputFile = fopen(inputUFXName, "r");
-  int64_t currCharsRead = fread(workBuffer, sizeof(unsigned char),totalCharsToRead , inputFile);
+  fseek(inputFile, MYTHREAD*kmersPerThread*LINE_SIZE, SEEK_SET);
+  int64_t charsRead = fread(workBuffer, sizeof(unsigned char), charsToRead, inputFile);
   fclose(inputFile);
-        
+  if (charsRead != charsToRead) {
+    printf("ERROR: thread %d only read %ld/%ld bytes!\n", MYTHREAD, charsRead, charsToRead);
+    return 0;
+  }
+  
   ///////////////////////////////////////////
   upc_barrier;
   inputTime += gettime();
@@ -69,7 +84,7 @@ int main(int argc, char *argv[]) {
   /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, 
      then a tab and then two characters (one for the left (backward) extension and one for the right (forward) extension) */
   int64_t ptr = 0;
-  while (ptr < currCharsRead) {
+  while (ptr < charsRead) {
     /* workBuffer[ptr] is the start of the current k-mer                */
     /* so current left extension is at workBuffer[ptr+KMER_LENGTH+1]    */
     /* and current right extension is at workBuffer[ptr+KMER_LENGTH+2]  */
