@@ -5,7 +5,7 @@
 #include <math.h>
 #include <time.h>
 #include <upc.h>
-//#include <upc_collective.h>
+#include <upc_collective.h>
 #include <bupc_collectivev.h>
 
 #include "packingDNAseq.h"
@@ -127,27 +127,52 @@ int main(int argc, char *argv[]) {
   
   printf("%d populated directory of start nodes of size %ld!\n", MYTHREAD, directory[MYTHREAD].size);
   
+  int64_t totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
+  int64_t nbytesTotalStartNodes = totalStartNodes * sizeof(shared kmer_t *shared);
+  
+  printf("%d knows total start nodes = %ld!\n", MYTHREAD, totalStartNodes);
+  
   
   // Shared pointer to global list of all thread's master start-node lists
-  shared kmer_t * shared * globalStartNodeArray;
-  
-  // Local pointer to first location (with thread affinity) of each thread's master list
-  //shared [1] kmer_t * startNodesGlobal;
-  shared kmer_t * shared * startNodesGlobal;
-  
-  int64_t totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
-  globalStartNodeArray = upc_all_alloc(THREADS, totalStartNodes * sizeof(shared kmer_t *shared));
+  shared kmer_t * shared * globalStartNodeArray = upc_all_alloc(THREADS, nbytesTotalStartNodes);
   
   if (globalStartNodeArray == NULL) {
-    fprintf(stderr, "ERROR: Could not allocate memory for the global start array: %lu bytes\n", totalStartNodes * sizeof(shared kmer_t *shared));
+    fprintf(stderr, "ERROR: Could not allocate memory for the global start array: %lu bytes\n", THREADS * totalStartNodes * sizeof(shared kmer_t *shared));
     upc_global_exit(1);
   }
   
-  startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
+  // Gather all local arrays into a global array of start kmers on the root thread
   
-  printf("%d knows total start nodes = %ld!\n", MYTHREAD, totalStartNodes);
-  // TODO: quitting because a2a not done yet
-  upc_global_exit(0);
+  // TODO: Make sure the [] allocates to root thread, or if works without
+  shared kmer_t * shared [] * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);;
+  
+  if (rootStartNodeArray == NULL) {
+    fprintf(stderr, "ERROR: Could not allocate memory for the root start array: %lu bytes\n", totalStartNodes * sizeof(shared kmer_t *shared));
+    upc_global_exit(1);
+  }
+  
+  int64_t rootStartNodeArrayOffset = 0;
+  
+  for (int i = 0; i < MYTHREAD; ++i)
+  {
+    // TODO: consider also gathering/broadcasting an array of sizes to minimize remote accesses for sizes
+    rootStartNodeArrayOffset += directory[i].size;
+  }
+  
+  upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(shared kmer_t *shared));
+  
+  // Broadcast global array of start kmers to all threads
+  
+  upc_all_broadcast(globalStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes, UPC_IN_ALLSYNC | UPC_OUT_ALLSYNC);
+  
+  
+  // Local pointer to first location (with thread affinity) of each thread's master list
+  //shared [1] kmer_t * startNodesGlobal;
+  shared kmer_t * shared * startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
+  
+  
+  
+  //upc_global_exit(0);
   
   //
   // MEGA TODO: GATHER FULL START NODE LIST AND BROADCAST!!!
