@@ -69,12 +69,10 @@ shared kmer_t* lookupKmer(hash_table_t *hashtable, const unsigned char *kmer) {
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
-  bucket_t currBucket;
-  shared kmer_t *result;
   
   // TODO: check don't need cast to local (bucket_t)
-  currBucket = hashtable->table[hashval];
-  result = currBucket.head;
+  shared bucket_t * currBucket = &(hashtable->table[hashval]);
+  shared kmer_t * result       = currBucket->head;
   
   while(result != NULL) {
     if (memcmp(packedKmer, (char *)result->kmer, KMER_PACKED_LENGTH * sizeof(char)) == 0) {

@@ -22,6 +22,8 @@ int main(int argc, char *argv[]) {
   char leftExt, rightExt;
   start_kmer_t *startKmersList = NULL, *currStartLink;
   
+  printf("%d init\n", MYTHREAD);
+  
   // Private variables to shared memory
   shared directory_entry_t *directory;
   directory = upc_all_alloc(THREADS, sizeof(directory_entry_t));
@@ -37,6 +39,8 @@ int main(int argc, char *argv[]) {
   
   /* Initialize lookup table that will be used for the DNA packing routines */
   initLookupTable();
+  
+  printf("%d starting to read input file...\n", MYTHREAD);
   
   /* Extract the number of k-mers in the input file */
   int64_t nKmers = getNumKmersInUFX(inputUFXName);
@@ -157,7 +161,8 @@ int main(int argc, char *argv[]) {
     rootStartNodeArrayOffset += directory[i].size;
   }
   
-  upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(shared kmer_t *shared));
+  // MAJOR TODO: this has to be uncommented
+  //upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(shared kmer_t *shared));
   upc_barrier;
   // Broadcast global array of start kmers to all threads
   upc_all_broadcast(globalStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
@@ -169,8 +174,7 @@ int main(int argc, char *argv[]) {
   printf("%d finishing a2a\n", MYTHREAD);
   
   //
-  // MEGA TODO: GATHER FULL START NODE LIST AND BROADCAST!!!
-  // ALL2ALL COMMUNICATION GOES HERE
+  // MEGA TODO: BEYOND THIS POINT, ALL BETS ARE OFF
   //
   
   ///////////////////////////////////////////
@@ -188,27 +192,26 @@ int main(int argc, char *argv[]) {
   /* Pick start nodes from the startNodesGlobal */
   shared int64_t *currSNIndex;
   int64_t localSNIndex = 0;
-  upc_lock_t *indexLock;
-  shared kmer_t *currKmerPtr;
-  shared int64_t *localBases;
-  shared int64_t *localContigs;
   char unpackedKmer[KMER_LENGTH+1];
   char currContig[MAXIMUM_CONTIG_SIZE];
   if (MYTHREAD == ROOT)
     *currSNIndex = 0;
-  indexLock = upc_all_lock_alloc();
-  localBases = upc_all_alloc(THREADS, sizeof(int64_t));
-  localContigs = upc_all_alloc(THREADS, sizeof(int64_t));
+  upc_lock_t * indexLock        = upc_all_lock_alloc();
+  shared int64_t * localBases   = upc_all_alloc(THREADS, sizeof(int64_t));
+  shared int64_t * localContigs = upc_all_alloc(THREADS, sizeof(int64_t));
+  
+  upc_barrier;
   localContigs[MYTHREAD] = 0;
   localBases[MYTHREAD] = 0;
   unpackedKmer[KMER_LENGTH] = '\0';
-  
+  upc_barrier;
   printf("%d finished initialization\n", MYTHREAD);
   
   // Synchronization
-  //while((localSNIndex = bupc_atomicI64_fetchadd_S(currSNIndex, (int64_t) 1LL)) != totalStartNodes-1) {
-  while(1)
-  {
+  //while((localSNIndex = bupc_atomicI64_fetchadd_S(*currSNIndex, (int64_t) 1LL)) != totalStartNodes-1) {
+  while(1) {
+    
+    // Lock to make sure only one thread updates currSNIndex
     upc_lock(indexLock);
     localSNIndex = *currSNIndex;
     (*currSNIndex)++;
@@ -217,7 +220,6 @@ int main(int argc, char *argv[]) {
       break;
     
     /* Unpack first seed and initialize contig */
-    
     shared kmer_t *currKmerPtr = startNodesGlobal[localSNIndex];
     unpackSequence((unsigned char*) currKmerPtr->kmer, (unsigned char*) unpackedKmer, KMER_LENGTH);
     memcpy(currContig, unpackedKmer, KMER_LENGTH * sizeof(char));
@@ -230,6 +232,10 @@ int main(int argc, char *argv[]) {
       posInContig++;
       /* The last kmer in the current contig is at position currContig[posInContig-KMER_LENGTH] */
       currKmerPtr = lookupKmer(hashtable, (const unsigned char *) &currContig[posInContig-KMER_LENGTH]);
+      if (currKmerPtr == NULL) {
+	fprintf(stderr, "ERROR: current pointer @%ld for thread=%d is null!\n", posInContig, MYTHREAD);
+	upc_global_exit(1);
+      }
       rightExt = currKmerPtr->rExt; // communication
     }
     
@@ -241,6 +247,10 @@ int main(int argc, char *argv[]) {
     localBases[MYTHREAD]++;
     
   }
+  
+  upc_barrier;
+  printf("%d successfully quitting... %ld\n", MYTHREAD, *currSNIndex);
+  upc_global_exit(0);
   
   ///////////////////////////////////////////
   upc_barrier;
