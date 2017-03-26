@@ -42,14 +42,17 @@ struct kmer_t{
 /* Start k-mer data structure */
 typedef struct start_kmer_t start_kmer_t;
 struct start_kmer_t{
-  shared kmer_t *kmerPtr;
+  //shared kmer_t *kmerPtr;
+  int64_t kmerIndex;
   start_kmer_t *next;
 };
 
 /* Directory entries data structure */
 typedef struct directory_entry_t directory_entry_t;
 struct directory_entry_t {
-  shared kmer_t *shared * localStartArray;
+  //shared kmer_t *shared [] * localStartArray;
+  //int64_t *localStartArray;
+  shared [] int64_t *localStartArray;
   int64_t size;
 };
 
@@ -57,6 +60,7 @@ struct directory_entry_t {
 /* Memory heap data structure */
 typedef struct memory_heap_t memory_heap_t;
 struct memory_heap_t {
+  //shared [] kmer_t *heap;
   shared kmer_t *heap;
   int64_t posInHeap;
 };
@@ -66,6 +70,7 @@ typedef struct bucket_t bucket_t;
 struct bucket_t{
   shared kmer_t *head;          // Pointer to the first entry of that bucket
   upc_lock_t *bucketLock;
+  int size;
 };
 
 /* Hash table data structure */

@@ -13,4 +13,4 @@ export GASNET_BACKTRACE=1
 
 cd ${PWD}
 
-upcrun -n 4 -N 1 ${EXE} ${INPUT}
+upcrun -n 4 -N 1 ${EXE} ${INPUT} > output/commandline.txt

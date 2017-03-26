@@ -88,6 +88,9 @@ int main(int argc, char *argv[]) {
   /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, 
      then a tab and then two characters (one for the left (backward) extension and one for the right (forward) extension) */
   int64_t ptr = 0;
+  
+  int debug = 1;
+  
   while (ptr < charsRead) {
     /* workBuffer[ptr] is the start of the current k-mer                */
     /* so current left extension is at workBuffer[ptr+KMER_LENGTH+1]    */
@@ -97,11 +100,14 @@ int main(int argc, char *argv[]) {
     rightExt = (char) workBuffer[ptr+KMER_LENGTH+2];
     
     /* Add k-mer to hash table */
-    int64_t kmerIndex = addKmer(hashtable, &memoryHeap, &workBuffer[ptr], leftExt, rightExt);
+    int64_t kmerIndex = addKmer(hashtable, &memoryHeap, &workBuffer[ptr], leftExt, rightExt, debug, heapBlockSize);
+    
+    if (debug)
+         debug = (debug >= 15) ? 0 : debug + 1;
     
     /* Create also a list with the "start" kmers: nodes with F as left (backward) extension */
     if (leftExt == 'F') {
-      addKmerToStartList(&memoryHeap, &startKmersList, kmerIndex);
+      addKmerToStartList(&memoryHeap, &startKmersList, kmerIndex, heapBlockSize);
       directory[MYTHREAD].size++;
     }
     
@@ -113,8 +119,10 @@ int main(int argc, char *argv[]) {
   
   int64_t localArraySize = directory[MYTHREAD].size;
   
-  directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(shared kmer_t *shared));
-  
+  //directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(shared kmer_t *shared));
+  //directory[MYTHREAD].localStartArray = (int64_t *shared) malloc(localArraySize * sizeof(int64_t));
+  directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(int64_t));
+   
   if (directory[MYTHREAD].localStartArray == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the local start array: %lu bytes for thread %d\n", localArraySize * sizeof(shared kmer_t *shared), MYTHREAD);
     upc_global_exit(1);
@@ -123,7 +131,8 @@ int main(int argc, char *argv[]) {
   int currIndex = 0;
   currStartLink = startKmersList;
   while (currStartLink != NULL) {
-    directory[MYTHREAD].localStartArray[currIndex] = currStartLink->kmerPtr;
+    //directory[MYTHREAD].localStartArray[currIndex] = currStartLink->kmerPtr;
+    directory[MYTHREAD].localStartArray[currIndex] = currStartLink->kmerIndex;
     
     currStartLink = currStartLink->next;
     currIndex++;
@@ -132,22 +141,24 @@ int main(int argc, char *argv[]) {
   printf("%d populated directory of start nodes of size %ld!\n", MYTHREAD, directory[MYTHREAD].size);
   
   int64_t totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
-  int64_t nbytesTotalStartNodes = totalStartNodes * sizeof(shared kmer_t *shared);
+  //int64_t nbytesTotalStartNodes = totalStartNodes * sizeof(shared kmer_t *shared);
+  int64_t nbytesTotalStartNodes = totalStartNodes * sizeof(int64_t);
   
   printf("%d knows total start nodes = %ld!\n", MYTHREAD, totalStartNodes);
   
   
   // Shared pointer to global list of all thread's master start-node lists
-  shared kmer_t * shared * globalStartNodeArray = upc_all_alloc(THREADS, nbytesTotalStartNodes);
+  /*shared kmer_t * shared * globalStartNodeArray = upc_all_alloc(THREADS, nbytesTotalStartNodes);
   
   if (globalStartNodeArray == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the global start array: %lu bytes\n", THREADS * totalStartNodes * sizeof(shared kmer_t *shared));
     upc_global_exit(1);
-  }
+  }*/
   
   /* Gather all local arrays into a global array of start kmers on the root thread */
   // TODO: Make sure the [] allocates to root thread, or if works without
-  shared kmer_t * shared [] * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);;
+  //shared kmer_t * shared [] * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);
+  shared [] int64_t * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);
   
   if (rootStartNodeArray == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the root start array: %lu bytes\n", totalStartNodes * sizeof(shared kmer_t *shared));
@@ -163,13 +174,41 @@ int main(int argc, char *argv[]) {
   
   // MAJOR TODO: this has to be uncommented
   //upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(shared kmer_t *shared));
+  //upc_memput(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(int64_t));
+  upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(int64_t));
+  
   upc_barrier;
   // Broadcast global array of start kmers to all threads
-  upc_all_broadcast(globalStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
+  //upc_all_broadcast(globalStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
   
   // Local pointer to first location (with thread affinity) of each thread's master list
   //shared [1] kmer_t * startNodesGlobal;
-  shared kmer_t * shared * startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
+  //shared kmer_t * shared * startNodesGlobal = &globalStartNodeArray[MYTHREAD * totalStartNodes];
+  
+  //shared kmer_t ** localStartNodeArray = malloc(nbytesTotalStartNodes);
+  int64_t *localStartNodeArray = malloc(nbytesTotalStartNodes);
+  
+  upc_memget(localStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes);
+  
+  /*for (int64_t i = 0; i < 10; ++i)
+  {
+    printf("%d !!!!! localStartNodeArray[%ld] = %p \n", MYTHREAD, i, localStartNodeArray[i]);
+  }*/
+  
+  for (int64_t i = 0; i < 10; ++i) {
+    char unpackedKmer[KMER_LENGTH+1];
+    unpackedKmer[KMER_LENGTH] = '\0';
+    //shared kmer_t * temp = ((shared kmer_t *)localStartNodeArray[i]);
+    
+    int64_t heapIndex = localStartNodeArray[i];
+    shared kmer_t * temp = (shared kmer_t *) bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(kmer_t), heapIndex);
+    unpackSequence((unsigned char*) temp->kmer, (unsigned char *) unpackedKmer, KMER_LENGTH);
+    
+    printf("%d localStartNodeArray[%ld] = %ld, unpacked = %19.19s \n", MYTHREAD, i, heapIndex, unpackedKmer);
+    
+    //printf("%d localStartNodeArray[%ld] = %p, ", MYTHREAD, i, temp);
+    //printf("unpackedKmer = %19.19s \n", unpackedKmer);
+  }
   
   printf("%d finishing a2a\n", MYTHREAD);
   
@@ -220,11 +259,16 @@ int main(int argc, char *argv[]) {
       break;
     
     /* Unpack first seed and initialize contig */
-    shared kmer_t *currKmerPtr = startNodesGlobal[localSNIndex];
+    //shared kmer_t *currKmerPtr = startNodesGlobal[localSNIndex];
+    //shared kmer_t *currKmerPtr = localStartNodeArray[localSNIndex];
+    
+    shared kmer_t *currKmerPtr = (shared kmer_t *) bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(shared kmer_t), localStartNodeArray[localSNIndex]);
     unpackSequence((unsigned char*) currKmerPtr->kmer, (unsigned char*) unpackedKmer, KMER_LENGTH);
     memcpy(currContig, unpackedKmer, KMER_LENGTH * sizeof(char));
     int64_t posInContig = KMER_LENGTH;
     rightExt = currKmerPtr->rExt; // communication
+    
+    //printf("%d !!!!! Starting (while (rightExt != F)\n", MYTHREAD);
     
     /* Keep adding bases until we find a terminal node */
     while (rightExt != 'F') {
@@ -238,6 +282,8 @@ int main(int argc, char *argv[]) {
       }
       rightExt = currKmerPtr->rExt; // communication
     }
+    
+    //printf("%d !!!!! Ending (while (rightExt != F)\n", MYTHREAD);
     
     /* Print the contig to our local file */
     currContig[posInContig] = '\0';
