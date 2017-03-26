@@ -10,6 +10,10 @@
 
 #include "commonDefaults_upc.h"
 
+int64_t local2Global(int64_t local) {
+  return (local*THREADS+MYTHREAD);
+}
+
 /* Creates a hash table and (pre)allocates memory for the memory heap */
 hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64_t heapBlockSize) {
   hash_table_t *result;
@@ -44,8 +48,8 @@ hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64
     fprintf(stderr, "ERROR: Could not allocate memory for the heap!\n");
     upc_global_exit(1);
   }
-  memoryHeap->posInHeap = MYTHREAD * heapBlockSize;
-  //memoryHeap->posInHeap = 0;
+  //memoryHeap->posInHeap = MYTHREAD * heapBlockSize;
+  memoryHeap->posInHeap = 0;
   
   return result;
 }
@@ -67,15 +71,16 @@ int64_t hashKmer(int64_t  hashtable_size, char *seq) {
 }
 
 /* Looks up a kmer in the hash table and returns a pointer to that entry */
-shared kmer_t* lookupKmer(hash_table_t *hashtable, const unsigned char *kmer) {
+void lookupKmer(hash_table_t *hashtable, kmer_t * result, const unsigned char *kmer) {
   
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
   
-  // TODO: check don't need cast to local (bucket_t)
+  // TODO: I'm pretty sure that this won't work
   shared bucket_t * currBucket = &(hashtable->table[hashval]);
-  shared kmer_t * result       = currBucket->head;
+  //kmer_t * result = malloc(sizeof(kmer_t));
+  upc_memget(result, currBucket->head, sizeof(kmer_t));
   
   int iteration = 0;
   //printf("%d !!!!! Searching for: packed:%5.5s unpacked:%19.19s hashval:%ld isBucketHeadNull:%d bucketSize:%d hashtableSize:%d \n", MYTHREAD, packedKmer, kmer, hashval, (result == NULL), currBucket->size, hashtable->size);
@@ -91,13 +96,17 @@ shared kmer_t* lookupKmer(hash_table_t *hashtable, const unsigned char *kmer) {
     
     if (memcmp(packedKmer, (char *)result->kmer, KMER_PACKED_LENGTH * sizeof(char)) == 0) {
       //printf("%d !!!!! Returning result = %p \n", MYTHREAD, result);
-      return result;
+      //return result;
+      return;
     }
     //printf("%d !!!!! Advancing result \n", MYTHREAD);
-    result = result->next;
+    //result = result->next;
+    upc_memget(result, result->next, sizeof(kmer_t));
+    
   }
   printf("%d !!!!! Failed lookup, returning NULL \n", MYTHREAD);
-  return NULL;
+  result = NULL;
+  return;
   
 }
 
@@ -108,13 +117,14 @@ int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsign
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
-  int64_t pos = memoryHeap->posInHeap;
+  int64_t pos = local2Global(memoryHeap->posInHeap);
   
   debug = 0;
   if (debug)
     printf("%d !!!!! addKmer1: call#:%d packed:%5.5s unpacked:%19.19s hashval:%ld pos:%d\n", MYTHREAD, debug, packedKmer, kmer, hashval, pos);
   
-  shared kmer_t *indexedKmer = (shared kmer_t *)bupc_ptradd(memoryHeap->heap, heapBlockSize, sizeof(kmer_t), pos);
+  //shared kmer_t *indexedKmer = (shared kmer_t *)bupc_ptradd(memoryHeap->heap, heapBlockSize, sizeof(kmer_t), pos);
+  shared kmer_t *indexedKmer = (shared kmer_t *)(&(memoryHeap->heap[pos]));
   
   // Add the contents to the appropriate kmer struct in the heap */
   //memcpy((memoryHeap->heap[pos]).kmer, packedKmer, KMER_PACKED_LENGTH * sizeof(char));
@@ -125,8 +135,7 @@ int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsign
   indexedKmer->lExt = leftExt;
   indexedKmer->rExt = rightExt;
   
-  if (debug)
-  {
+  if (debug) {
     char unpackedKmer[KMER_LENGTH+1];
     unpackedKmer[KMER_LENGTH] = '\0';
     //unpackSequence((unsigned char*) (memoryHeap->heap[pos]).kmer, (unsigned char*) unpackedKmer, KMER_LENGTH);
@@ -146,7 +155,6 @@ int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsign
   // Fix the head pointer of the appropriate bucket to point to the current kmer
   //hashtable->table[hashval].head = (shared kmer_t *) &(memoryHeap->heap[pos]);
   hashtable->table[hashval].head = indexedKmer;
-  //hashtable->table[hashval].head = &(memoryHeap->heap[pos]);
   hashtable->table[hashval].size++;
   // Exit critical section
   upc_unlock((hashtable->table[hashval]).bucketLock);
@@ -171,10 +179,11 @@ void addKmerToStartList(memory_heap_t *memoryHeap, start_kmer_t **startKmersList
   (*startKmersList) = newEntry;
 }
 
+
+
 /* Deallocate heap. Call before calling deallocHashtable */
 int deallocHeap(memory_heap_t *memoryHeap) {
   upc_all_free(memoryHeap->heap);
-  free(memoryHeap);
   return 0;
 }
 

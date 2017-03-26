@@ -20,13 +20,12 @@ int main(int argc, char *argv[]) {
   // Private variables
   double inputTime=0.0, constrTime=0.0, traversalTime=0.0;
   char leftExt, rightExt;
-  start_kmer_t *startKmersList = NULL, *currStartLink;
+  start_kmer_t *startKmersList = NULL;
   
   printf("%d init\n", MYTHREAD);
   
   // Private variables to shared memory
-  shared directory_entry_t *directory;
-  directory = upc_all_alloc(THREADS, sizeof(directory_entry_t));
+  shared directory_entry_t *directory = upc_all_alloc(THREADS, sizeof(directory_entry_t));
   directory[MYTHREAD].size = 0;
   
   ///////////////////////////////////////////
@@ -102,8 +101,16 @@ int main(int argc, char *argv[]) {
     /* Add k-mer to hash table */
     int64_t kmerIndex = addKmer(hashtable, &memoryHeap, &workBuffer[ptr], leftExt, rightExt, debug, heapBlockSize);
     
-    if (debug)
-         debug = (debug >= 15) ? 0 : debug + 1;
+    if (debug) {
+      char unpackedKmer[KMER_LENGTH+1];
+      unpackedKmer[KMER_LENGTH] = '\0';
+      //shared kmer_t * temp = bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(kmer_t), kmerIndex);
+      shared [1] kmer_t * temp = &memoryHeap.heap[kmerIndex];
+      unpackSequence((unsigned char*) temp->kmer, (unsigned char *) unpackedKmer, KMER_LENGTH);
+      printf("%d heap[%ld] with affinity=%ld, unpacked = %19.19s\n", MYTHREAD, kmerIndex, upc_threadof(temp), unpackedKmer);
+      
+      debug = (debug >= 15) ? 0 : debug + 1;
+    }
     
     /* Create also a list with the "start" kmers: nodes with F as left (backward) extension */
     if (leftExt == 'F') {
@@ -116,23 +123,35 @@ int main(int argc, char *argv[]) {
   }
   
   printf("%d added kmers to hash table!\n", MYTHREAD);
+  upc_barrier;
+  
+  for (int64_t i = 0; i < 10; ++i) {
+    char unpackedKmer[KMER_LENGTH+1];
+    unpackedKmer[KMER_LENGTH] = '\0';
+    //shared [1] kmer_t * temp = &memoryHeap.heap[i];
+    kmer_t * temp = malloc(sizeof(kmer_t));
+    upc_memget(temp, &memoryHeap.heap[i], sizeof(kmer_t));
+    unpackSequence((unsigned char*) temp->kmer, (unsigned char *) unpackedKmer, KMER_LENGTH);
+    printf("%d heap[%ld], unpacked = %19.19s\n", MYTHREAD, i, unpackedKmer);
+    free(temp);
+  }
   
   int64_t localArraySize = directory[MYTHREAD].size;
   
   //directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(shared kmer_t *shared));
-  //directory[MYTHREAD].localStartArray = (int64_t *shared) malloc(localArraySize * sizeof(int64_t));
-  directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(int64_t));
+  int64_t *localStartArray = malloc(localArraySize * sizeof(int64_t));
+  //directory[MYTHREAD].localStartArray = upc_alloc(localArraySize * sizeof(int64_t));
    
-  if (directory[MYTHREAD].localStartArray == NULL) {
+  if (localStartArray == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the local start array: %lu bytes for thread %d\n", localArraySize * sizeof(shared kmer_t *shared), MYTHREAD);
-    upc_global_exit(1);
+    exit(1);
   }
   
   int currIndex = 0;
-  currStartLink = startKmersList;
+  start_kmer_t *currStartLink = startKmersList;
   while (currStartLink != NULL) {
     //directory[MYTHREAD].localStartArray[currIndex] = currStartLink->kmerPtr;
-    directory[MYTHREAD].localStartArray[currIndex] = currStartLink->kmerIndex;
+    localStartArray[currIndex] = currStartLink->kmerIndex;
     
     currStartLink = currStartLink->next;
     currIndex++;
@@ -159,23 +178,20 @@ int main(int argc, char *argv[]) {
   // TODO: Make sure the [] allocates to root thread, or if works without
   //shared kmer_t * shared [] * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);
   shared [] int64_t * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);
-  
   if (rootStartNodeArray == NULL) {
     fprintf(stderr, "ERROR: Could not allocate memory for the root start array: %lu bytes\n", totalStartNodes * sizeof(shared kmer_t *shared));
     upc_global_exit(1);
   }
   
   int64_t rootStartNodeArrayOffset = 0;
-  
   for (int i = 0; i < MYTHREAD; ++i) {
     // TODO: consider also gathering/broadcasting an array of sizes to minimize remote accesses for sizes
     rootStartNodeArrayOffset += directory[i].size;
   }
   
-  // MAJOR TODO: this has to be uncommented
   //upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(shared kmer_t *shared));
   //upc_memput(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(int64_t));
-  upc_memcpy(&rootStartNodeArray[rootStartNodeArrayOffset], &(directory[MYTHREAD].localStartArray[0]), localArraySize * sizeof(int64_t));
+  upc_memput(&rootStartNodeArray[rootStartNodeArrayOffset], localStartArray, localArraySize * sizeof(int64_t));
   
   upc_barrier;
   // Broadcast global array of start kmers to all threads
@@ -187,7 +203,6 @@ int main(int argc, char *argv[]) {
   
   //shared kmer_t ** localStartNodeArray = malloc(nbytesTotalStartNodes);
   int64_t *localStartNodeArray = malloc(nbytesTotalStartNodes);
-  
   upc_memget(localStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes);
   
   /*for (int64_t i = 0; i < 10; ++i)
@@ -201,13 +216,17 @@ int main(int argc, char *argv[]) {
     //shared kmer_t * temp = ((shared kmer_t *)localStartNodeArray[i]);
     
     int64_t heapIndex = localStartNodeArray[i];
-    shared kmer_t * temp = (shared kmer_t *) bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(kmer_t), heapIndex);
+    kmer_t * temp = malloc(sizeof(kmer_t));
+    upc_memget(temp, &memoryHeap.heap[i], sizeof(kmer_t));
+    //shared [1] kmer_t * temp = &memoryHeap.heap[i];
+    //shared kmer_t * temp = (shared kmer_t *) bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(kmer_t), heapIndex);
     unpackSequence((unsigned char*) temp->kmer, (unsigned char *) unpackedKmer, KMER_LENGTH);
     
     printf("%d localStartNodeArray[%ld] = %ld, unpacked = %19.19s \n", MYTHREAD, i, heapIndex, unpackedKmer);
     
     //printf("%d localStartNodeArray[%ld] = %p, ", MYTHREAD, i, temp);
     //printf("unpackedKmer = %19.19s \n", unpackedKmer);
+    free(temp);
   }
   
   printf("%d finishing a2a\n", MYTHREAD);
@@ -231,23 +250,24 @@ int main(int argc, char *argv[]) {
   /* Pick start nodes from the startNodesGlobal */
   shared int64_t *currSNIndex;
   int64_t localSNIndex = 0;
+  int64_t localContigs = 0;
+  int64_t localBases = 0;
   char unpackedKmer[KMER_LENGTH+1];
   char currContig[MAXIMUM_CONTIG_SIZE];
   if (MYTHREAD == ROOT)
     *currSNIndex = 0;
-  upc_lock_t * indexLock        = upc_all_lock_alloc();
-  shared int64_t * localBases   = upc_all_alloc(THREADS, sizeof(int64_t));
-  shared int64_t * localContigs = upc_all_alloc(THREADS, sizeof(int64_t));
+  upc_lock_t * indexLock = upc_all_lock_alloc();
   
   upc_barrier;
-  localContigs[MYTHREAD] = 0;
-  localBases[MYTHREAD] = 0;
+  
   unpackedKmer[KMER_LENGTH] = '\0';
   upc_barrier;
   printf("%d finished initialization\n", MYTHREAD);
   
   // Synchronization
   //while((localSNIndex = bupc_atomicI64_fetchadd_S(*currSNIndex, (int64_t) 1LL)) != totalStartNodes-1) {
+  kmer_t * currKmerPtr = malloc(sizeof(kmer_t));
+  
   while(1) {
     
     // Lock to make sure only one thread updates currSNIndex
@@ -262,7 +282,9 @@ int main(int argc, char *argv[]) {
     //shared kmer_t *currKmerPtr = startNodesGlobal[localSNIndex];
     //shared kmer_t *currKmerPtr = localStartNodeArray[localSNIndex];
     
-    shared kmer_t *currKmerPtr = (shared kmer_t *) bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(shared kmer_t), localStartNodeArray[localSNIndex]);
+    //shared kmer_t *currKmerPtr = (shared kmer_t *) bupc_ptradd(memoryHeap.heap, heapBlockSize, sizeof(shared kmer_t), localStartNodeArray[localSNIndex]);
+    //shared [1] kmer_t *currKmerPtr = &memoryHeap.heap[localSNIndex];
+    upc_memget(currKmerPtr, &memoryHeap.heap[localSNIndex], sizeof(kmer_t));
     unpackSequence((unsigned char*) currKmerPtr->kmer, (unsigned char*) unpackedKmer, KMER_LENGTH);
     memcpy(currContig, unpackedKmer, KMER_LENGTH * sizeof(char));
     int64_t posInContig = KMER_LENGTH;
@@ -275,7 +297,7 @@ int main(int argc, char *argv[]) {
       currContig[posInContig] = rightExt;
       posInContig++;
       /* The last kmer in the current contig is at position currContig[posInContig-KMER_LENGTH] */
-      currKmerPtr = lookupKmer(hashtable, (const unsigned char *) &currContig[posInContig-KMER_LENGTH]);
+      lookupKmer(hashtable, currKmerPtr, (const unsigned char *) &currContig[posInContig-KMER_LENGTH]);
       if (currKmerPtr == NULL) {
 	fprintf(stderr, "ERROR: current pointer @%ld for thread=%d is null!\n", posInContig, MYTHREAD);
 	upc_global_exit(1);
@@ -289,14 +311,10 @@ int main(int argc, char *argv[]) {
     currContig[posInContig] = '\0';
     fprintf(myOutputFile,"%s\n", currContig);
     // TODO: only for debugging
-    localContigs[MYTHREAD]++;
-    localBases[MYTHREAD]++;
+    localContigs++;
+    localBases++;
     
   }
-  
-  upc_barrier;
-  printf("%d successfully quitting... %ld\n", MYTHREAD, *currSNIndex);
-  upc_global_exit(0);
   
   ///////////////////////////////////////////
   upc_barrier;
@@ -306,25 +324,21 @@ int main(int argc, char *argv[]) {
   
   /** Print timing and output info **/
   // TODO: reduce localContigs and localBases for debugging
-  shared int64_t *totalBases;
-  shared int64_t *totalContigs;
   upc_barrier;
-  upc_all_reduceL(totalContigs, localContigs, UPC_ADD, THREADS, 1, 
-		  NULL, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
-  upc_all_reduceL(totalBases, localBases, UPC_ADD, THREADS, 1, 
-		  NULL, UPC_IN_NOSYNC | UPC_OUT_NOSYNC);
+  int64_t totalBases = bupc_allv_reduce(int64_t, localContigs, ROOT, UPC_ADD);
+  int64_t totalContigs = bupc_allv_reduce(int64_t, localBases, ROOT, UPC_ADD);
   upc_barrier;
   
   printf("%d finished reductions\n", MYTHREAD);
   
   /** CLEAN UP */
-  upc_free(directory[MYTHREAD].localStartArray);
   upc_all_free(directory);
   free(workBuffer);
-    
-  upc_all_free(localContigs);
-  upc_all_free(localBases);
-  upc_lock_free(indexLock);
+  free(localStartArray);
+  
+  free(currKmerPtr);
+  
+  upc_all_lock_free(indexLock);
   
   deallocHeap(&memoryHeap);
   deallocHashtable(hashtable);
@@ -336,7 +350,7 @@ int main(int argc, char *argv[]) {
     printf("Input reading time: %f seconds\n", inputTime);
     printf("Graph construction time: %f seconds\n", constrTime);
     printf("Graph traversal time: %f seconds\n", traversalTime);
-    printf("Generated %ld contigs with %ld total bases\n", *totalContigs, *totalBases);
+    printf("Generated %ld contigs with %ld total bases\n", totalContigs, totalBases);
   }
   
   return 0;

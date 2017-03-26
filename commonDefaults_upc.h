@@ -52,7 +52,6 @@ typedef struct directory_entry_t directory_entry_t;
 struct directory_entry_t {
   //shared kmer_t *shared [] * localStartArray;
   //int64_t *localStartArray;
-  shared [] int64_t *localStartArray;
   int64_t size;
 };
 
@@ -61,7 +60,7 @@ struct directory_entry_t {
 typedef struct memory_heap_t memory_heap_t;
 struct memory_heap_t {
   //shared [] kmer_t *heap;
-  shared kmer_t *heap;
+  shared [1] kmer_t *heap;
   int64_t posInHeap;
 };
 
