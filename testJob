@@ -7,10 +7,14 @@
 #SBATCH -o output/pgenTest.%j.out
 #SBATCH -e output/pgenTest.%j.err
 
-INPUT=input/test
+#INPUT=input/test
+INPUT=$SCRATCH/my_stripped_folder/largeinput
 EXE=./pgen
 export GASNET_BACKTRACE=1
 
 cd ${PWD}
 
 upcrun -n 4 -N 1 ${EXE} ${INPUT} > output/commandline.txt
+
+cat output/pgen-*.out > output/pgen.out
+sort output/pgen.out > output/pgen.sorted

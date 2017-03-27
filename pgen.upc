@@ -169,11 +169,11 @@ int main(int argc, char *argv[]) {
   
   // TODO: Save output to "output/pgen.out"?
   char localOutFilename[20];
-  sprintf(localOutFilename, "output/pgen%d.out", MYTHREAD);
+  sprintf(localOutFilename, "output/pgen-%d.out", MYTHREAD);
   FILE * myOutputFile = fopen(localOutFilename, "w");
   
   /* Pick start nodes from the startNodesGlobal */
-  shared int64_t *currSNIndex;
+  shared int64_t *currSNIndex = upc_all_alloc(1, sizeof(int64_t));
   int64_t localSNIndex = 0;
   int64_t localContigs = 0;
   int64_t localBases = 0;
@@ -191,9 +191,8 @@ int main(int argc, char *argv[]) {
   
   // Synchronization
   kmer_t * currKmerPtr = malloc(sizeof(kmer_t));
-  //while((localSNIndex = bupc_atomicI64_fetchadd_S(*currSNIndex, (int64_t) 1LL)) != totalStartNodes-1) {  
-  while(1) {
-    
+  //while((localSNIndex = bupc_atomicI64_fetchadd_strict((shared void*)currSNIndex, (int64_t) 1)) < totalStartNodes) {  
+   while(1) {
     // Lock to make sure only one thread updates currSNIndex
     // TODO: try atomic operation?
     upc_lock(indexLock);
@@ -269,6 +268,7 @@ int main(int argc, char *argv[]) {
     printf("Input reading time: %f seconds\n", inputTime);
     printf("Graph construction time: %f seconds\n", constrTime);
     printf("Graph traversal time: %f seconds\n", traversalTime);
+    printf("Total time: %f seconds\n", inputTime + constrTime + traversalTime);
     printf("Generated %ld contigs with %ld total bases\n", totalContigs, totalBases);
   }
   

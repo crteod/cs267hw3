@@ -1,18 +1,12 @@
 #ifndef KMER_HASH_UPC_H
 #define KMER_HASH_UPC_H
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <math.h>
 #include <upc_relaxed.h>
-
 #include "commonDefaults_upc.h"
-
-int64_t local2Global(int64_t local) {
-  return (local*THREADS+MYTHREAD);
-}
 
 /* Creates a hash table and (pre)allocates memory for the memory heap */
 hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64_t heapBlockSize) {
@@ -102,7 +96,7 @@ int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsign
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
-  int64_t pos = local2Global(memoryHeap->posInHeap);
+  int64_t pos =  memoryHeap->posInHeap * THREADS + MYTHREAD;
   
   // TODO: does this match our definitely correct syntax throughout pgen.upc?
   shared kmer_t *indexedKmer = (shared kmer_t *)(&(memoryHeap->heap[pos]));
