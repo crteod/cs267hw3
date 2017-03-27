@@ -8,7 +8,8 @@
 #SBATCH -e output/serial-HW3.%j.err
 
 
-INPUT=input/test
+#INPUT=input/test
+INPUT=$SCRATCH/my_stripped_folder/largeinput
 
 cd ${PWD}
 srun -n 1 ./serial ${INPUT}

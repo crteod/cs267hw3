@@ -15,7 +15,7 @@
 #endif
 
 #ifndef KMER_LENGTH
-#define KMER_LENGTH 19
+#define KMER_LENGTH 51
 #endif
 
 #ifndef LOAD_FACTOR
@@ -36,13 +36,12 @@ struct kmer_t{
   char kmer[KMER_PACKED_LENGTH];
   char lExt;
   char rExt;
-  shared kmer_t *next;
+  int64_t next;
 };
 
 /* Start k-mer data structure */
 typedef struct start_kmer_t start_kmer_t;
 struct start_kmer_t{
-  //shared kmer_t *kmerPtr;
   int64_t kmerIndex;
   start_kmer_t *next;
 };
@@ -50,8 +49,6 @@ struct start_kmer_t{
 /* Directory entries data structure */
 typedef struct directory_entry_t directory_entry_t;
 struct directory_entry_t {
-  //shared kmer_t *shared [] * localStartArray;
-  //int64_t *localStartArray;
   int64_t size;
 };
 
@@ -59,7 +56,6 @@ struct directory_entry_t {
 /* Memory heap data structure */
 typedef struct memory_heap_t memory_heap_t;
 struct memory_heap_t {
-  //shared [] kmer_t *heap;
   shared [1] kmer_t *heap;
   int64_t posInHeap;
 };
@@ -67,9 +63,7 @@ struct memory_heap_t {
 /* Bucket data structure */
 typedef struct bucket_t bucket_t;
 struct bucket_t{
-  shared kmer_t *head;          // Pointer to the first entry of that bucket
-  upc_lock_t *bucketLock;
-  int size;
+  int64_t head;                 // Heap index to the first entry of that bucket
 };
 
 /* Hash table data structure */

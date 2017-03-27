@@ -14,7 +14,7 @@
 #endif
 
 #ifndef KMER_LENGTH
-#define KMER_LENGTH 19
+#define KMER_LENGTH 51
 #endif
 
 #ifndef LOAD_FACTOR

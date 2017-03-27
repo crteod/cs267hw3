@@ -181,7 +181,6 @@ int main(int argc, char *argv[]) {
   char currContig[MAXIMUM_CONTIG_SIZE];
   if (MYTHREAD == ROOT)
     *currSNIndex = 0;
-  upc_lock_t * indexLock = upc_all_lock_alloc();
   
   upc_barrier;
   
@@ -191,16 +190,7 @@ int main(int argc, char *argv[]) {
   
   // Synchronization
   kmer_t * currKmerPtr = malloc(sizeof(kmer_t));
-  //while((localSNIndex = bupc_atomicI64_fetchadd_strict((shared void*)currSNIndex, (int64_t) 1)) < totalStartNodes) {  
-   while(1) {
-    // Lock to make sure only one thread updates currSNIndex
-    // TODO: try atomic operation?
-    upc_lock(indexLock);
-    localSNIndex = *currSNIndex;
-    (*currSNIndex)++;
-    upc_unlock(indexLock);
-    if (localSNIndex >= totalStartNodes)
-      break;
+  while((localSNIndex = bupc_atomicI64_fetchadd_strict((shared void*)currSNIndex, (int64_t) 1)) < totalStartNodes) {  
     
     /* Unpack first seed and initialize contig */
     int64_t heapIndex = localStartNodeArray[localSNIndex];
@@ -217,7 +207,7 @@ int main(int argc, char *argv[]) {
       posInContig++;
       
       /* The last kmer in the current contig is at position currContig[posInContig-KMER_LENGTH] */
-      lookupKmer(hashtable, currKmerPtr, (const unsigned char *) &currContig[posInContig-KMER_LENGTH]);
+      lookupKmer(hashtable, &memoryHeap, currKmerPtr, (const unsigned char *) &currContig[posInContig-KMER_LENGTH]);
       if (currKmerPtr == NULL) {
 	fprintf(stderr, "ERROR: current pointer @%ld for thread=%d is null!\n", posInContig, MYTHREAD);
 	exit(1);
@@ -255,8 +245,6 @@ int main(int argc, char *argv[]) {
   free(localStartArray);
   
   free(currKmerPtr);
-  
-  upc_all_lock_free(indexLock);
   
   deallocHeap(&memoryHeap);
   deallocHashtable(hashtable);
