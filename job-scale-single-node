@@ -10,6 +10,7 @@
 
 # Specify path to your input file here
 INPUT=input/test
+#INPUT=$SCRATCH/my_stripped_folder/largeinput
 
 cd ${PWD}
 for P in `seq 1 6`; do

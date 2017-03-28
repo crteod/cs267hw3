@@ -8,7 +8,8 @@
 #SBATCH -e output/multi-HW3.%j.err
 
 # Specify path to your input file here
-INPUT=input/test
+#INPUT=input/test
+INPUT=$SCRATCH/my_stripped_folder/largeinput
 
 cd ${PWD}
 for P in 96 120 144 168 192; do

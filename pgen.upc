@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
   char leftExt, rightExt;
   start_kmer_t *startKmersList = NULL;
   
-  printf("%d init\n", MYTHREAD);
+  //printf("%d init\n", MYTHREAD);
   
   ///////////////////////////////////////////
   /** Read input **/
@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
   /* Initialize lookup table that will be used for the DNA packing routines */
   initLookupTable();
   
-  printf("%d starting to read input file...\n", MYTHREAD);
+  //printf("%d starting to read input file...\n", MYTHREAD);
   
   /* Extract the number of k-mers in the input file */
   int64_t nKmers = getNumKmersInUFX(inputUFXName);
@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
   
   /** Graph construction **/
   constrTime -= gettime();
-  printf("%d finished reading input file!\n", MYTHREAD);
+  //printf("%d finished reading input file!\n", MYTHREAD);
   
   int64_t heapBlockSize = (kmersPerThread > kmersLeftOver ? kmersPerThread : kmersLeftOver);
   
@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     upc_global_exit(1);
   }
   
-  printf("%d created hash table!\n", MYTHREAD);
+  //printf("%d created hash table!\n", MYTHREAD);
   
   /* Process the workBuffer and store the k-mers in the hash table */
   /* Expected format: KMER LR ,i.e. first k characters that represent the kmer, 
@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
     ptr += LINE_SIZE;
   }
   
-  printf("%d added kmers to hash table!\n", MYTHREAD);
+  //printf("%d added kmers to hash table!\n", MYTHREAD);
   upc_barrier;
   ///////////////////////////////////////////
   
@@ -139,7 +139,7 @@ int main(int argc, char *argv[]) {
     currIndex++;
   }
   
-  printf("%d populated local array of start nodes of size %ld!\n", MYTHREAD, localPartialArraySizes[MYTHREAD]);
+  //printf("%d populated local array of start nodes of size %ld!\n", MYTHREAD, localPartialArraySizes[MYTHREAD]);
   
   // Gather all partial array sizes in one array on root thread, then broadcast a copy to all threads for local access
   upc_all_gather(rootArraySizes, localPartialArraySizes, sizeof(int64_t), UPC_IN_ALLSYNC | UPC_OUT_ALLSYNC);
@@ -158,12 +158,12 @@ int main(int argc, char *argv[]) {
   // TODO: Remove after testing gather/broadcast of size arrays vs direct remote access
   /*for (int i = 0; i < MYTHREAD; ++i) {
     rootStartNodeArrayOffset += localPartialArraySizes[i];
-  }*/
-  //totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
-  
+  }
+  totalStartNodes = bupc_allv_reduce_all(int64_t, localArraySize, UPC_ADD);
+  */
   int64_t nbytesTotalStartNodes = totalStartNodes * sizeof(int64_t);
   
-  printf("%d knows total start nodes = %ld!\n", MYTHREAD, totalStartNodes);
+  //printf("%d knows total start nodes = %ld!\n", MYTHREAD, totalStartNodes);
   
   /* Gather all local partial arrays of start nodes into a global array of start kmers on the root thread */
   shared [] int64_t * rootStartNodeArray = upc_all_alloc(1, nbytesTotalStartNodes);
@@ -186,7 +186,7 @@ int main(int argc, char *argv[]) {
   upc_barrier;
   upc_memget(localStartNodeArray, rootStartNodeArray, nbytesTotalStartNodes);
   
-  printf("%d finishing a2a\n", MYTHREAD);
+  //printf("%d finishing a2a\n", MYTHREAD);
   upc_barrier;
   constrTime += gettime();
   ///////////////////////////////////////////
@@ -218,7 +218,7 @@ int main(int argc, char *argv[]) {
   
   unpackedKmer[KMER_LENGTH] = '\0';
   
-  printf("%d finished initialization\n", MYTHREAD);
+  //printf("%d finished initialization\n", MYTHREAD);
   
   // Synchronization
   kmer_t currKmerPtr;
@@ -260,14 +260,14 @@ int main(int argc, char *argv[]) {
   upc_barrier;
   traversalTime += gettime();
   
-  printf("%d finished traversal\n", MYTHREAD);
+  //printf("%d finished traversal\n", MYTHREAD);
   
   /** Print timing and output info **/
   // TODO: reduce localContigs and localBases only for debugging
   int64_t totalBases = bupc_allv_reduce(int64_t, localContigs, ROOT, UPC_ADD);
   int64_t totalContigs = bupc_allv_reduce(int64_t, localBases, ROOT, UPC_ADD);
   
-  printf("%d finished reductions\n", MYTHREAD);
+  //printf("%d finished reductions\n", MYTHREAD);
   
   /** CLEAN UP */
   free(workBuffer);
@@ -288,5 +288,4 @@ int main(int argc, char *argv[]) {
   }
   
   return 0;
-  
 }
