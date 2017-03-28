@@ -36,28 +36,21 @@ struct kmer_t{
   char kmer[KMER_PACKED_LENGTH];
   char lExt;
   char rExt;
-  int64_t next;
+  int64_t next;                 // Index to kmer_t in heap
 };
 
 /* Start k-mer data structure */
 typedef struct start_kmer_t start_kmer_t;
 struct start_kmer_t{
-  int64_t kmerIndex;
+  int64_t kmerIndex;            // Index to kmer_t in heap
   start_kmer_t *next;
 };
-
-/* Directory entries data structure */
-typedef struct directory_entry_t directory_entry_t;
-struct directory_entry_t {
-  int64_t size;
-};
-
 
 /* Memory heap data structure */
 typedef struct memory_heap_t memory_heap_t;
 struct memory_heap_t {
-  shared [1] kmer_t *heap;
-  int64_t posInHeap;
+  shared [1] kmer_t *heap;      // Cycled heap array
+  int64_t posInHeap;            // Logical thread offset/phase
 };
 
 /* Bucket data structure */

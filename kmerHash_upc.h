@@ -14,8 +14,13 @@ hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64
   int64_t nBuckets = nEntries * LOAD_FACTOR;
   
   result = malloc(sizeof(hash_table_t));
+  
+  if (result == NULL) {
+    fprintf(stderr, "ERROR: Could not allocate memory for result in createHashTable\n");
+    upc_global_exit(1);
+  }
+  
   result->size = nBuckets;
-  // TODO: check that sizeof shared bucket_t doesn't change things
   result->table = upc_all_alloc(nBuckets, sizeof(bucket_t));
   
   if (result->table == NULL) {
@@ -25,7 +30,7 @@ hash_table_t* createHashTable(int64_t nEntries, memory_heap_t *memoryHeap, int64
   }
   
   upc_forall(int i = 0; i < nBuckets; ++i; i) {
-    result->table[i].head = -1; // Must be set to -1 before addKmer() called
+    result->table[i].head = -1; // Set to -1 as a flag indicating bucket is empty. Must be set before addKmer() called
   }
   
   memoryHeap->heap = upc_all_alloc(THREADS, heapBlockSize * sizeof(kmer_t));
@@ -57,13 +62,12 @@ int64_t hashKmer(int64_t  hashtable_size, char *seq) {
 }
 
 /* Looks up a kmer in the hash table and returns a pointer to that entry */
-void lookupKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, kmer_t * result, const unsigned char *kmer) {
+int lookupKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, kmer_t * result, const unsigned char *kmer) {
   
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
   
-  // TODO: I'm pretty sure that this shouldn't work?
   shared bucket_t * currBucket = &(hashtable->table[hashval]);
   int64_t currIndex = currBucket->head;
   
@@ -71,23 +75,22 @@ void lookupKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, kmer_t * res
   {
     upc_memget(result, &memoryHeap->heap[currIndex], sizeof(kmer_t));
     if (memcmp(packedKmer, (char *)result->kmer, KMER_PACKED_LENGTH * sizeof(char)) == 0) {   
-      return;
+      return 0;
     }
     currIndex = result->next;
   }
   
-  fprintf(stderr, "ERROR: %d failed lookup on contig, returning NULL \n", MYTHREAD);
-  result = NULL;
-  return;  
+  return 1;  
 }
 
 /* Adds a kmer and its extensions in the hash table (note that memory heap must be preallocated!) */
-int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsigned char *kmer, char leftExt, char rightExt, int64_t heapBlockSize) {
+int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsigned char *kmer, char leftExt, char rightExt) {
   
   /* Pack a k-mer sequence appropriately */
   char packedKmer[KMER_PACKED_LENGTH];
   packSequence(kmer, (unsigned char*) packedKmer, KMER_LENGTH);
   int64_t hashval = hashKmer(hashtable->size, (char*) packedKmer);
+  // Convert from "logical thread offset/phase" to global index in cycled array
   int64_t pos =  memoryHeap->posInHeap * THREADS + MYTHREAD;
   
   // Atomically add kmer to bucket
@@ -99,16 +102,15 @@ int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsign
     realOldHead = bupc_atomicI64_cswap_strict(&hashtable->table[hashval].head, oldHead, pos);
   }
   
-  // TODO: does this match our definitely correct syntax throughout pgen.upc?
   shared kmer_t *indexedKmer = (shared kmer_t *)(&(memoryHeap->heap[pos]));
-  kmer_t localKmer;
+  kmer_t tempKmer;
   
   /* Add the contents to the appropriate kmer struct in the heap */
-  memcpy(localKmer.kmer, packedKmer, KMER_PACKED_LENGTH * sizeof(char));
-  localKmer.lExt = leftExt;
-  localKmer.rExt = rightExt;
-  localKmer.next = realOldHead;
-  upc_memput(indexedKmer, &localKmer, sizeof(kmer_t));
+  memcpy(tempKmer.kmer, packedKmer, KMER_PACKED_LENGTH * sizeof(char));
+  tempKmer.lExt = leftExt;
+  tempKmer.rExt = rightExt;
+  tempKmer.next = realOldHead;
+  upc_memput(indexedKmer, &tempKmer, sizeof(kmer_t));
   
   // Increase the heap pointer
   memoryHeap->posInHeap++;
@@ -118,9 +120,15 @@ int64_t addKmer(hash_table_t *hashtable, memory_heap_t *memoryHeap, const unsign
 }
 
 /* Adds a k-mer in the start list by using the memory heap */
-void addKmerToStartList(memory_heap_t *memoryHeap, start_kmer_t **startKmersList, int64_t kmerIndex, int64_t heapBlockSize) {
+void addKmerToStartList(memory_heap_t *memoryHeap, start_kmer_t **startKmersList, int64_t kmerIndex) {
   
   start_kmer_t *newEntry = (start_kmer_t*) malloc(sizeof(start_kmer_t));
+  
+  if (newEntry == NULL) {
+    fprintf(stderr, "ERROR: Could not allocate memory for newEntry in addKmerToStartList\n");
+    upc_global_exit(1);
+  }
+  
   newEntry->next = (*startKmersList);
   newEntry->kmerIndex = kmerIndex;
   (*startKmersList) = newEntry;
